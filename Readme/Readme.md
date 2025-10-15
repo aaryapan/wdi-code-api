@@ -1,9 +1,17 @@
-# WDI Code API
+# WDI Assistants API
 
-Three endpoints for the WDI coding platform:
+Minimal API for WDI's internal coding platform using **OpenAI Assistants**.
 
-- POST `/api/save_project` — save project + files (MVP: acknowledge + projectId)
-- POST `/api/make_plan` — PRE (re-engineer prompt, return steps 1..N)
-- POST `/api/run_step` — guarded codegen for a single step, ≤600 lines, returns ZIP + status
+## Endpoints
+- `POST /api/save_project` → returns `{ ok, projectId }`
+- `POST /api/make_plan` → calls Planner Assistant → returns `{ proposedPrompt, inScope, outOfScope, assumptions, acceptanceCriteria, questions, steps }`
+- `POST /api/run_step` → server-guarded; calls Builder Assistant → returns `{ status: "passed" | "continue", zipUrl?, addedStep?, validatorSummary, githubPrUrl? }`
 
-**Guard word:** `Ok WDI Code Now`
+## Env Vars (set in Vercel Project → Settings → Environment Variables)
+- `OPENAI_API_KEY`
+- `PLANNER_ASSISTANT_ID`
+- `BUILDER_ASSISTANT_ID`
+- `GUARD_WORD` → e.g. `Ok WDI Code Now`
+
+> The UI must only call these endpoints. Do not put secrets in the UI.
+
