@@ -1,3 +1,5 @@
+export const config = { runtime: 'edge' };
+
 import OpenAI from "openai";
 
 const oai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
@@ -34,11 +36,9 @@ WDI React standards apply: React 18 + TypeScript, Radix UI, Redux Toolkit + RTK 
   });
 
   const data = JSON.parse(resp.choices[0]?.message?.content || "{}");
-
-  const steps = Array.isArray(data.steps) ? data.steps.slice(0, 10).map((s: any, i: number) => ({
-    id: s?.id || `s${i + 1}`,
-    title: s?.title || `Step ${i + 1}`
-  })) : [];
+  const steps = Array.isArray(data.steps)
+    ? data.steps.slice(0, 10).map((s: any, i: number) => ({ id: s?.id || `s${i+1}`, title: s?.title || `Step ${i+1}` }))
+    : [];
 
   return Response.json({
     proposedPrompt: data.proposedPrompt ?? userRawPrompt,
