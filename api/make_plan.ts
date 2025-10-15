@@ -1,52 +1,115 @@
-export const config = { runtime: 'edge' };
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import OpenAI from 'openai';
 
-import OpenAI from "openai";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+const PLANNER_ASSISTANT_ID = process.env.PLANNER_ASSISTANT_ID!;
 
-const oai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const oai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
-
-  const { projectId, userRawPrompt } = await req.json() as {
-    projectId?: string; userRawPrompt?: string;
-  };
-
-  if (!projectId || !userRawPrompt) {
-    return Response.json({ error: "projectId and userRawPrompt required" }, { status: 400 });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).send('Method Not Allowed');
+  }
+  if (!OPENAI_API_KEY || !PLANNER_ASSISTANT_ID) {
+    return res.status(500).json({ error: 'Server not configured: missing OPENAI_API_KEY or PLANNER_ASSISTANT_ID' });
   }
 
-  const system = `You are the WDI PRE Planner.
-Rewrite the user prompt strictly in-scope based on an agreed Scope of Work.
-Return JSON ONLY with keys:
-proposedPrompt, inScope[], outOfScope[], assumptions[], acceptanceCriteria[], questions[], steps[] (≤10 items with {id,title}).`;
+  const body = coerceJson(req.body) as {
+    projectId?: string;
+    userRawPrompt?: string;
+  };
 
-  const user = `user_prompt:
-${userRawPrompt}
+  const { projectId, userRawPrompt } = body || {};
+  if (!projectId || !userRawPrompt) {
+    return res.status(400).json({ error: 'projectId and userRawPrompt required' });
+  }
 
-WDI React standards apply: React 18 + TypeScript, Radix UI, Redux Toolkit + RTK Query, and Tailwind or styled-components. Produce ≤10 steps.`;
+  try {
+    // Create a fresh thread for this PRE call
+    const thread = await oai.beta.threads.create();
 
-  const resp = await oai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0.2,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user }
-    ]
-  });
+    // Add the user's raw prompt as a message (keep it simple for MVP)
+    await oai.beta.threads.messages.create(thread.id, {
+      role: 'user',
+      content:
+        [
+          'You will produce ONLY JSON.',
+          'Return keys exactly:',
+          'proposedPrompt:string, inScope:string[], outOfScope:string[], assumptions:string[], acceptanceCriteria:string[], questions:string[], steps:{id:string,title:string}[] (≤10).',
+          'Never generate code.',
+          '',
+          `RAW_PROMPT:\n${userRawPrompt}`
+        ].join('\n')
+    });
 
-  const data = JSON.parse(resp.choices[0]?.message?.content || "{}");
-  const steps = Array.isArray(data.steps)
-    ? data.steps.slice(0, 10).map((s: any, i: number) => ({ id: s?.id || `s${i+1}`, title: s?.title || `Step ${i+1}` }))
-    : [];
+    // Run with the Planner Assistant
+    const run = await oai.beta.threads.runs.createAndPoll(thread.id, {
+      assistant_id: PLANNER_ASSISTANT_ID
+    });
 
-  return Response.json({
-    proposedPrompt: data.proposedPrompt ?? userRawPrompt,
-    inScope: data.inScope ?? [],
-    outOfScope: data.outOfScope ?? [],
-    assumptions: data.assumptions ?? [],
-    acceptanceCriteria: data.acceptanceCriteria ?? [],
-    questions: data.questions ?? [],
-    steps
-  });
+    if (run.status !== 'completed') {
+      return res.status(502).json({ error: `Planner run not completed: ${run.status}` });
+    }
+
+    // Read assistant response
+    const msgs = await oai.beta.threads.messages.list(thread.id);
+    const assistantMsg = msgs.data.find(m => m.role === 'assistant');
+    const text = extractText(assistantMsg);
+
+    const parsed = safeParseJson(text);
+
+    // Normalize and clamp steps to ≤10
+    const steps = Array.isArray(parsed?.steps)
+      ? parsed.steps.slice(0, 10).map((s: any, i: number) => ({
+          id: s?.id || `s${i + 1}`,
+          title: s?.title || `Step ${i + 1}`
+        }))
+      : [];
+
+    return res.status(200).json({
+      proposedPrompt: parsed?.proposedPrompt ?? userRawPrompt,
+      inScope: toArray(parsed?.inScope),
+      outOfScope: toArray(parsed?.outOfScope),
+      assumptions: toArray(parsed?.assumptions),
+      acceptanceCriteria: toArray(parsed?.acceptanceCriteria),
+      questions: toArray(parsed?.questions),
+      steps
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Planner error' });
+  }
+}
+
+// --- helpers ---
+function coerceJson(input: any) {
+  if (typeof input === 'string') {
+    try { return JSON.parse(input); } catch { return {}; }
+  }
+  return input || {};
+}
+
+function extractText(msg: any): string {
+  if (!msg?.content) return '';
+  // Assistants API returns segments; we only need text for MVP
+  const parts = msg.content
+    .filter((c: any) => c.type === 'text' && c.text?.value)
+    .map((c: any) => c.text.value);
+  return parts.join('\n').trim();
+}
+
+function safeParseJson(s: string) {
+  if (!s) return {};
+  // Try plain JSON
+  try { return JSON.parse(s); } catch { /* fallthrough */ }
+  // Try to extract first ```json block
+  const m = s.match(/```json\s*([\s\S]+?)\s*```/i);
+  if (m) {
+    try { return JSON.parse(m[1]); } catch { /* ignore */ }
+  }
+  return {};
+}
+
+function toArray(x: any): string[] {
+  return Array.isArray(x) ? x.map(String) : [];
 }
