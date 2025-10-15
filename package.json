@@ -1,14 +1,15 @@
 {
-  "name": "wdi-code-api",
+  "name": "wdi-assistants-api",
   "private": true,
-  "type": "module",
   "version": "0.1.0",
   "license": "UNLICENSED",
   "dependencies": {
     "adm-zip": "^0.5.12",
     "openai": "^4.57.0",
-    "uuid": "^9.0.1",
-    "zod": "^3.23.8"
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.26",
+    "typescript": "^5.4.5"
   }
 }
- 
