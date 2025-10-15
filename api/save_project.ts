@@ -1,17 +1,35 @@
-export const config = { runtime: 'edge' };
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { randomUUID } from 'node:crypto';
 
-import { randomUUID } from "node:crypto";
-
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).send('Method Not Allowed');
   }
 
-  const body = await req.json().catch(() => null) as any;
-  if (!body || !body.name || body.tech !== "react_ts") {
-    return Response.json({ ok: false, error: "Missing fields" }, { status: 400 });
+  const body = coerceJson(req.body);
+
+  const name = body?.name;
+  const tech = body?.tech;
+  // files may be URLs or opaque handles from your UI; stored later if you choose
+  const files = body?.files;
+
+  if (!name || tech !== 'react_ts') {
+    return res.status(400).json({ ok: false, error: 'Missing fields (name, tech=react_ts required)' });
   }
 
-  const projectId = body.projectId || randomUUID();
-  return Response.json({ ok: true, projectId });
+  // For MVP: just mint and return a projectId
+  const projectId = body?.projectId || randomUUID();
+
+  // (Optional later: upload files to storage and/or attach to Assistants vector stores)
+
+  return res.status(200).json({ ok: true, projectId });
+}
+
+// --- helpers ---
+function coerceJson(input: any) {
+  if (typeof input === 'string') {
+    try { return JSON.parse(input); } catch { return {}; }
+  }
+  return input || {};
 }
