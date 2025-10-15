@@ -1,3 +1,5 @@
+export const config = { runtime: 'edge' };
+
 import { randomUUID } from "node:crypto";
 
 export default async function handler(req: Request): Promise<Response> {
@@ -10,9 +12,6 @@ export default async function handler(req: Request): Promise<Response> {
     return Response.json({ ok: false, error: "Missing fields" }, { status: 400 });
   }
 
-  // MVP: just mint an ID and acknowledge.
   const projectId = body.projectId || randomUUID();
-
-  // (Later) Upload files to storage, parse text, store summaries.
   return Response.json({ ok: true, projectId });
 }
